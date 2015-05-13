@@ -1,0 +1,229 @@
+#!/usr/bin/ruby
+
+require 'erb'
+require 'json'
+require 'pp'
+
+
+# Set some global stuff
+$domain     = "frese.me"
+$git_remote = "origin"
+$git_repo   = %x(git config --get remote.#{$git_remote}.url).chomp
+$git_branch = %x(git rev-parse --abbrev-ref HEAD).chomp
+
+$key                = 'afkey'
+$role               = 'base'
+$environment        = 'staging'
+$region             = 'eu-west-1'
+$owner              = %x(id -u -n).chomp
+$image_id           = "ami-bf0897c8"
+$instance_type      = "m1.small"
+$vpc_id             = "vpc-1041ea75"
+$public_subnet      = "subnet-d5db54a2"
+$private_subnet     = "subnet-d6db54a1"
+$user_data_file     = "/tmp/userdata.#{Process.pid}"
+
+# Get the arguments
+
+$hostname           = $role
+$dns                = "#{$hostname}.#{$domain}"
+#$iam_profile        = "arn:aws:iam::236446965690:instance-profile/role1"
+$iam_profile        = "role1"
+$security_group_ids = %x(aws ec2 describe-security-groups --region #{$region} --filters Name=vpc-id,Values=#{$vpc_id} --output json|jgrep "SecurityGroups/*/GroupName,GroupId"|grep -E "#{$environment}|#{$role}|default"|cut -d, -f2|paste -s -d" " -).chomp
+$public_ip_option   = "--associate-public-ip-address"
+
+puts "Found Security groups :" + $security_group_ids
+
+def get_template()
+%{Content-Type: multipart/mixed; boundary=hCBmba2sC4RI8b9Te8pcDDezMumEN1aU
+MIME-Version: 1.0
+
+--hCBmba2sC4RI8b9Te8pcDDezMumEN1aU
+Content-Type: text/cloud-config; charset="us-ascii"
+MIME-Version: 1.0
+Content-Transfer-Encoding: 7bit
+Content-Disposition: attachment; filename="cloud-config.txt"
+
+# Upgrade installed packages
+package_upgrade: true
+
+# Install additional packages on first boot
+packages:
+ - lvm2
+ - wget
+ - git
+ - puppet3
+ - awscli
+ 
+# run commands
+# runcmd contains a list of either lists or a string
+# each item will be executed in order
+runcmd:
+  - sh -c echo "Hello world"
+
+# set the locale
+locale: en_US.UTF-8
+ 
+# timezone: set the timezone for this instance (ALWAYS user UTC!)
+timezone: UTC
+ 
+# Log all cloud-init process output (info & errors) to a logfile
+output: {all: ">> /var/log/cloud-init-output.log"}
+ 
+# final_message written to log when cloud-init processes are finished
+final_message: "System boot complete, after $UPTIME seconds. Finished at $TIMESTAMP"
+
+write_files:
+    - path: /usr/local/bin/puppet-apply
+      permissions: '0755'
+      content: |
+        #!/bin/bash
+        puppet apply --debug --verbose /etc/puppet/manifests/site.pp
+
+    - path: /usr/local/bin/puppet-pull
+      permissions: '0755'
+      content: |
+        #!/bin/bash
+        . /etc/puppet/git_settings.sh
+        cd /var/cache/puppet_repo
+        git fetch && git reset origin/<%= $git_branch %> --hard
+              
+    - path: /usr/local/bin/puppet-pull-apply
+      permissions: '0755'
+      content: |
+        #!/bin/bash
+        puppet-pull && puppet-apply
+              
+    - path: /etc/puppet/puppet.conf
+      permissions: '0555'
+      content: |
+        [main]
+        environment = <%= $environment %>
+        certname = <%= $dns %>
+
+    - path: /etc/puppet/git_settings.sh
+      permissions: '0755'
+      content: |
+        #!/bin/bash
+        export GIT_REPO="<%= $git_repo %>"
+        export GIT_BRANCH="<%= $git_branch %>"
+
+preserve_hostname: true
+manage_etc_hosts: false
+
+bootcmd:
+ - cloud-init-per instance my_set_hostname sh -xc "echo <%= $hostname %> > /etc/hostname; hostname -F /etc/hostname"
+ - cloud-init-per instance my_etc_hosts sh -xc "sed -i -e '/^127.0.0.1/d' /etc/hosts; echo 127.0.0.1 <%= $dns %> <%= $hostname %> localhost >> /etc/hosts"
+
+
+--hCBmba2sC4RI8b9Te8pcDDezMumEN1aU
+Content-Type: text/x-shellscript; charset="us-ascii"
+MIME-Version: 1.0
+Content-Transfer-Encoding: 7bit
+Content-Disposition: attachment; filename="user-script.txt"
+
+#!/bin/bash
+set -x
+
+. /etc/puppet/git_settings.sh
+
+# Get the github ssh key out of s3 (IAM providing access to S3)
+# so we can clone from our private github repos
+for attempt in {1..10} ; do
+  if (aws --region eu-west-1 s3 cp s3://<%= $domain %>/git-keys/id_rsa /root/.ssh/id_rsa) then
+    chmod 600 /root/.ssh/id_rsa
+    break
+  fi
+  echo "Could not copy github key from S3 (yet?), retrying in 2 seconds."
+  sleep 2
+done
+
+
+# Add github.com to known_hosts
+ssh -T -oStrictHostKeyChecking=no git@github.com
+
+# do not run the puppet agent, as we don't have a puppet master either
+service puppet stop
+chkconfig puppet off
+
+REPO_DIR=/var/cache/bootstrap
+REPO_BASE=puppet
+
+# clone puppet manifest from github
+# TODO fallback to backup server if connection to github fails
+if [ -f ${REPO_DIR}/.git ]; then
+  # if /etc/puppet already is a git repository, just pull the latest changes
+  # (this means we're probably running from a snapshotted AMI)
+  cd ${REPO_DIR}
+  git fetch && git reset origin/${GIT_BRANCH} --hard
+else
+  # Otherwise, clone a clean repo
+  rm -rf /etc/puppet/files /etc/puppet/manifests /etc/puppet/modules /etc/puppet/templates /etc/puppet/ssl \
+         /etc/puppet/etckeeper* /etc/puppet/*.dpkg-dist /etc/puppet/hiera.yaml /etc/puppet/environments
+  git clone --depth 20 -b ${GIT_BRANCH} ${GIT_REPO} ${REPO_DIR}
+  mv /etc/puppet/* ${REPO_DIR}/${REPO_BASE}
+  rm -rf /etc/puppet
+  ln -s ${REPO_DIR}/${REPO_BASE} /etc/puppet
+fi
+
+# Run puppet
+/usr/local/bin/puppet-apply
+
+--hCBmba2sC4RI8b9Te8pcDDezMumEN1aU--
+}
+end
+
+# lets render the template
+
+out = ERB.new(get_template())
+# print out.result
+
+File.open($user_data_file, "w+") do |f|
+    f.write(out.result)
+end
+
+puts "Starting instance ..."
+
+out = JSON.parse( %x( aws ec2 run-instances \
+         --image-id #{$image_id} \
+         --region #{$region} \
+         --key #{$key} \
+         --security-group-ids #{$security_group_ids} \
+         --user-data file:///#{$user_data_file} \
+         --instance-type #{$instance_type} \
+         --iam-instance-profile Name="#{$iam_profile}" \
+         --subnet #{$public_subnet} \
+         #{$public_ip_option} \
+         --output json ))
+
+
+$instanceid = out["Instances"][0]["InstanceId"]
+
+# Set some tags
+puts "Setting tags ..."
+%x( aws ec2 create-tags --region #{$region} --resources #{$instanceid} --tags \
+    Key=Name,Value=#{$hostname} \
+    Key=Role,Value=#{$role} \
+    Key=Environment,Value=#{$environment} \
+    Key=Owner,Value=#{$owner} )
+    
+# Fetch the public ip-address
+puts "Waiting for public ip address ..."
+$public_ip = ""
+30.downto(0) do
+    $public_ip = %x(aws ec2 describe-instances --region #{$region} --instance-id #{$instanceid} --output json|jgrep "Reservations/0/Instances/0/PublicIpAddress")
+    break unless $public_ip.match("nil")
+    sleep 1
+end
+if $public_ip.match("nil")
+    puts "... giving up after 30 sec."
+    exit
+end
+
+#
+# Cleanup
+#File.delete($user_data_file)
+
+puts "--------------------------------------------------------------------------------------"
+puts "Instance ready :"
+puts %x(aws ec2 describe-instances --region #{$region} --instance-id #{$instanceid} --output text)

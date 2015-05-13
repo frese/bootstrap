@@ -1,0 +1,8 @@
+/var/log/puppet-cron.log
+{
+	daily
+	rotate 5
+	create
+	dateext
+	missingok
+}
