@@ -1,0 +1,11 @@
+# conf
+:backends:
+    - yaml
+    
+:yaml:
+    :datadir: /etc/puppet/hiera
+    
+:hierachy:
+    - common    
+    
+:logger: console

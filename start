@@ -1,34 +1,44 @@
 #!/usr/bin/ruby
 
+require 'rubygems'
+require 'hiera'
 require 'erb'
 require 'json'
 require 'pp'
 
+# Get the arguments
+$environment = 'staging'
+$role        = 'base'
+$region      = 'eu-west-1'
 
-# Set some global stuff
-$domain     = "frese.me"
-$git_remote = "origin"
-$git_repo   = %x(git config --get remote.#{$git_remote}.url).chomp
-$git_branch = %x(git rev-parse --abbrev-ref HEAD).chomp
 
-$key                = 'afkey'
-$role               = 'base'
-$environment        = 'staging'
-$region             = 'eu-west-1'
-$owner              = %x(id -u -n).chomp
-$image_id           = "ami-bf0897c8"
-$instance_type      = "m1.small"
-$vpc_id             = "vpc-1041ea75"
-$public_subnet      = "subnet-d5db54a2"
-$private_subnet     = "subnet-d6db54a1"
-$user_data_file     = "/tmp/userdata.#{Process.pid}"
+# Init hiera
+HIERADB = Hiera.new(:config => 'hiera/hiera.yaml')
+
+def hiera(key)
+    HIERADB.lookup(key, nil, :environment => $environment)
+end
+
+# Set some global stuff, mostly reading from Hiera
+$domain         = hiera("domain")
+$git_remote     = "origin"
+$git_repo       = %x(git config --get remote.#{$git_remote}.url).chomp
+$git_branch     = %x(git rev-parse --abbrev-ref HEAD).chomp
+$key            = hiera("aws::key")
+$owner          = %x(id -u -n).chomp
+$image_id       = hiera("aws::image-id")
+$instance_type  = hiera("aws::instance-type")
+$vpc_id         = hiera("aws::vpc-id")
+$public_subnet  = hiera("aws::subnet::public")
+$private_subnet = hiera("aws::subnet::private")
+$user_data_file = "/tmp/userdata.#{Process.pid}"
+
 
 # Get the arguments
 
 $hostname           = $role
 $dns                = "#{$hostname}.#{$domain}"
-#$iam_profile        = "arn:aws:iam::236446965690:instance-profile/role1"
-$iam_profile        = "role1"
+$iam_profile        = hiera("aws:iam-profile")
 $security_group_ids = %x(aws ec2 describe-security-groups --region #{$region} --filters Name=vpc-id,Values=#{$vpc_id} --output json|jgrep "SecurityGroups/*/GroupName,GroupId"|grep -E "#{$environment}|#{$role}|default"|cut -d, -f2|paste -s -d" " -).chomp
 $public_ip_option   = "--associate-public-ip-address"
 
@@ -85,7 +95,7 @@ write_files:
       content: |
         #!/bin/bash
         . /etc/puppet/git_settings.sh
-        cd /var/cache/puppet_repo
+        cd /var/cache/bootstrap
         git fetch && git reset origin/<%= $git_branch %> --hard
               
     - path: /usr/local/bin/puppet-pull-apply
