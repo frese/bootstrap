@@ -1,0 +1,8 @@
+# Region "ireland"
+
+aws::region: eu-west-1
+
+aws::vpc-id: vpc-1041ea75
+aws::subnet::public: subnet-d5db54a2
+aws::subnet::private: subnet-d6db54a1
+aws::image-id: ami-bf0897c8

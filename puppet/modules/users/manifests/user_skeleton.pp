@@ -3,7 +3,6 @@ define users::user_skeleton {
   $info = merge({
     color_terminal => true
   }, $user_info[$name])
-  $prompt_host_color = hiera('users::users::prompt_host_color')
 
   user { $name:
     comment => $info['email'],

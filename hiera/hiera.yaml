@@ -1,12 +1,15 @@
 # conf
+:logger: noop
+
 :backends:
     - yaml
-    
+
 :yaml:
     :datadir: ./hiera
-    
-:hierachy:
+
+:hierarchy:
     - "%{::clientcert}"
-    - common    
-    
-:logger: noop
+    - "roles/%{::role}"
+    - "regions/%{::region}"
+    - "environments/%{::environment}"
+    - common

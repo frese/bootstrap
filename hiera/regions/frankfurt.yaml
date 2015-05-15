@@ -1,0 +1,8 @@
+# Region "frankfurt"
+
+aws::region: eu-central-1
+
+aws::vpc-id: vpc-???
+aws::subnet::public: subnet-???
+aws::subnet::private: subnet-???
+aws::image-id: ami-???

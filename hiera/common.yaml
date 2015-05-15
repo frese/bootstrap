@@ -2,18 +2,16 @@
 domain: frese.me
 
 aws::key: afkey
-aws::image-id: ami-bf0897c8
-aws::region: eu-west-1
-aws::vpc-id: vpc-1041ea75
-aws::subnet::public: subnet-d5db54a2
-aws::subnet::private: subnet-d6db54a1
 aws::instance-type: m1.small
 aws::iam-profile: role1
+
+
+users::users::names: [ af ]
 
 user_info:
   af:
     email: 'allan@frese.me'
     keys:
       af-mainkey:
-        key: AAAAB3NzaC1yc2EAAAADAQABAAABAQDhgiLwOfuAYN0OajwuDV4NFqEvQuwyntA+T6vLmwZ3uLAArQIYHJ9L4nI077kCCLA6zMboGHcu1ZG7Jn7S+uMNSw2ZfxhUzqnaQXxAO0qHuN5TywpaExDiyBo6Ko5Rn1PaKw9iuTVznrNk5liv+m4mB9f2+hkr4mpnef/by0zKQdP6BNci6FWXqSjROfqn3Y0J4M9D6CAafY0GglKG6xLfENbEShP6QYGMV0EZt0DXUO6LCPGFH5DfTjWaiOfirOuXjKCTlU7szEDeysXEAo88bCBhP1gRLKcEP0SvT36zh4/iFjM+cmvmW5tSjI5cMxFLiGQoSqRy1mbA6pIaECaR
+        key: AAAAB3NzaC1yc2EAAAADAQABAAABAQDFsEZNb57scBbUn7gtZYZU3aFnthgEVr9nwrsAyTHf/V+vxAIApo6owBAK0Mc9kT+E/nAG8vz1Duc/mYkw19fY+UBQbuM6Ku+wJOBsWkf2JA2UZzbqWTC9R5XI5uUaL3a33pc48St/GaoP8CXi7wdMQbqClJp0lLPGd7jASUOu5Tl+fsEvI974ugy8a6PbxC+L3sqEmoOJLlXBogTAZ4TJvxyYMj1LS3C87MGgiXjkiGwV2bOhLRW0Ek72stwLl8h8QmChVHWF0MJtDh/whuA8SMGJIfXuFJt39a0ITLjgybYdu3rrEpAX2U2P0P9bOlB1KH7AXPI2x9cCu82g0CLR
         type: ssh-rsa

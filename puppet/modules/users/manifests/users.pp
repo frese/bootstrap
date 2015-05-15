@@ -1,4 +1,4 @@
-class users::users($names, $prompt_host_color) {
+class users::users($names) {
 
 # Being in the npsudo group grants password-less access to sudo
   group { 'npsudo':

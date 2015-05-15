@@ -1,11 +1,16 @@
 # conf
+:logger: puppet
+
 :backends:
     - yaml
     
 :yaml:
-    :datadir: /etc/puppet/hiera
+    :datadir: /etc/hiera
     
-:hierachy:
-    - common    
+:hierarchy:
+    - "%{::clientcert}"
+    - "roles/%{::role}"
+    - "regions/%{::region}"
+    - "environments/%{::environment}"
+    - common
     
-:logger: console

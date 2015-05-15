@@ -5,18 +5,26 @@ require 'hiera'
 require 'erb'
 require 'json'
 require 'pp'
+require 'optparse'
 
-# Get the arguments
+# Set the defaults, get the arguments
 $environment = 'staging'
 $role        = 'base'
-$region      = 'eu-west-1'
+$region      = 'ireland'
 
+OptionParser.new do |opt|
+    opt.on('-e', '--environment ENVIRONMENT') { |o| $environment = o }
+    opt.on('-r', '--role ROLE')               { |o| $role = o }
+    opt.on('-p', '--region REGION')           { |o| $region = o }
+end.parse!
 
 # Init hiera
 HIERADB = Hiera.new(:config => 'hiera/hiera.yaml')
 
 def hiera(key)
-    HIERADB.lookup(key, nil, :environment => $environment)
+    var = HIERADB.lookup(key, nil, { "::environment" => $environment, "::role" => $role, "::region" => $region} )
+    puts "Warning, hiera returning nil for key #{key}" if var.nil?
+    return var
 end
 
 # Set some global stuff, mostly reading from Hiera
@@ -28,6 +36,7 @@ $key            = hiera("aws::key")
 $owner          = %x(id -u -n).chomp
 $image_id       = hiera("aws::image-id")
 $instance_type  = hiera("aws::instance-type")
+$aws_region     = hiera("aws::region")
 $vpc_id         = hiera("aws::vpc-id")
 $public_subnet  = hiera("aws::subnet::public")
 $private_subnet = hiera("aws::subnet::private")
@@ -38,8 +47,8 @@ $user_data_file = "/tmp/userdata.#{Process.pid}"
 
 $hostname           = $role
 $dns                = "#{$hostname}.#{$domain}"
-$iam_profile        = hiera("aws:iam-profile")
-$security_group_ids = %x(aws ec2 describe-security-groups --region #{$region} --filters Name=vpc-id,Values=#{$vpc_id} --output json|jgrep "SecurityGroups/*/GroupName,GroupId"|grep -E "#{$environment}|#{$role}|default"|cut -d, -f2|paste -s -d" " -).chomp
+$iam_profile        = hiera("aws::iam-profile")
+$security_group_ids = %x(aws ec2 describe-security-groups --region #{$aws_region} --filters Name=vpc-id,Values=#{$vpc_id} --output json|jgrep "SecurityGroups/*/GroupName,GroupId"|grep -E "#{$environment}|#{$role}|default"|cut -d, -f2|paste -s -d" " -).chomp
 $public_ip_option   = "--associate-public-ip-address"
 
 puts "Found Security groups :" + $security_group_ids
@@ -94,7 +103,7 @@ write_files:
       permissions: '0755'
       content: |
         #!/bin/bash
-        . /etc/puppet/git_settings.sh
+        . /etc/git_settings.sh
         cd /var/cache/bootstrap
         git fetch && git reset origin/<%= $git_branch %> --hard
               
@@ -111,7 +120,7 @@ write_files:
         environment = <%= $environment %>
         certname = <%= $dns %>
 
-    - path: /etc/puppet/git_settings.sh
+    - path: /etc/git_settings.sh
       permissions: '0755'
       content: |
         #!/bin/bash
@@ -135,7 +144,7 @@ Content-Disposition: attachment; filename="user-script.txt"
 #!/bin/bash
 set -x
 
-. /etc/puppet/git_settings.sh
+. /etc/git_settings.sh
 
 # Get the github ssh key out of s3 (IAM providing access to S3)
 # so we can clone from our private github repos
@@ -157,7 +166,6 @@ service puppet stop
 chkconfig puppet off
 
 REPO_DIR=/var/cache/bootstrap
-REPO_BASE=puppet
 
 # clone puppet manifest from github
 # TODO fallback to backup server if connection to github fails
@@ -171,9 +179,10 @@ else
   rm -rf /etc/puppet/files /etc/puppet/manifests /etc/puppet/modules /etc/puppet/templates /etc/puppet/ssl \
          /etc/puppet/etckeeper* /etc/puppet/*.dpkg-dist /etc/puppet/hiera.yaml /etc/puppet/environments
   git clone --depth 20 -b ${GIT_BRANCH} ${GIT_REPO} ${REPO_DIR}
-  mv /etc/puppet/* ${REPO_DIR}/${REPO_BASE}
+  mv /etc/puppet/* ${REPO_DIR}/puppet
   rm -rf /etc/puppet
-  ln -s ${REPO_DIR}/${REPO_BASE} /etc/puppet
+  ln -s ${REPO_DIR}/puppet /etc/puppet
+  ln -s ${REPO_DIR}/hiera /etc/hiera
 fi
 
 # Run puppet
@@ -196,7 +205,7 @@ puts "Starting instance ..."
 
 out = JSON.parse( %x( aws ec2 run-instances \
          --image-id #{$image_id} \
-         --region #{$region} \
+         --region #{$aws_region} \
          --key #{$key} \
          --security-group-ids #{$security_group_ids} \
          --user-data file:///#{$user_data_file} \
@@ -211,7 +220,7 @@ $instanceid = out["Instances"][0]["InstanceId"]
 
 # Set some tags
 puts "Setting tags ..."
-%x( aws ec2 create-tags --region #{$region} --resources #{$instanceid} --tags \
+%x( aws ec2 create-tags --region #{$aws_region} --resources #{$instanceid} --tags \
     Key=Name,Value=#{$hostname} \
     Key=Role,Value=#{$role} \
     Key=Environment,Value=#{$environment} \
@@ -221,7 +230,7 @@ puts "Setting tags ..."
 puts "Waiting for public ip address ..."
 $public_ip = ""
 30.downto(0) do
-    $public_ip = %x(aws ec2 describe-instances --region #{$region} --instance-id #{$instanceid} --output json|jgrep "Reservations/0/Instances/0/PublicIpAddress")
+    $public_ip = %x(aws ec2 describe-instances --region #{$aws_region} --instance-id #{$instanceid} --output json|jgrep "Reservations/0/Instances/0/PublicIpAddress")
     break unless $public_ip.match("nil")
     sleep 1
 end
@@ -230,10 +239,12 @@ if $public_ip.match("nil")
     exit
 end
 
-#
+# Set DNS - gratisDNS / R53 ??
+
+
 # Cleanup
-#File.delete($user_data_file)
+File.delete($user_data_file)
 
 puts "--------------------------------------------------------------------------------------"
 puts "Instance ready :"
-puts %x(aws ec2 describe-instances --region #{$region} --instance-id #{$instanceid} --output text)
+puts %x(aws ec2 describe-instances --region #{$aws_region} --instance-id #{$instanceid} --output table)
